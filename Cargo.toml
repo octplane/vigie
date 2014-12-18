@@ -1,0 +1,23 @@
+[package]
+
+name = "vigie"
+version = "0.0.1"
+authors = ["Pierre Baillet <pierre@baillet.name>"]
+
+# homepage = "https://github.com/octplane/rust-linenoise"
+description = "Simple binding to lib linenoise (readline-like) in rust. linenoise is included."
+readme = "README.markdown"
+keywords = ["cli", "library", "binding"]
+license = "MIT"
+
+[[bin]]
+
+name = "vigie"
+
+[build-dependencies]
+
+linenoise-rust = "~0.0.1"
+yaml = "~0.0.6"
+
+[dependencies.http]
+git = "https://github.com/chris-morgan/rust-http"
