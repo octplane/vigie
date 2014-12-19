@@ -4,10 +4,10 @@ name = "vigie"
 version = "0.0.1"
 authors = ["Pierre Baillet <pierre@baillet.name>"]
 
-# homepage = "https://github.com/octplane/rust-linenoise"
-description = "Simple binding to lib linenoise (readline-like) in rust. linenoise is included."
+# homepage = "https://github.com/octplane/vigie"
+description = "Vigis is a monitoring tool."
 readme = "README.markdown"
-keywords = ["cli", "library", "binding"]
+keywords = ["daemon", "monitoring"]
 license = "MIT"
 
 [[bin]]
@@ -17,7 +17,5 @@ name = "vigie"
 [build-dependencies]
 
 linenoise-rust = "~0.0.1"
-yaml = "~0.0.6"
-
-[dependencies.http]
-git = "https://github.com/chris-morgan/rust-http"
+# yaml = "~0.0.6"
+url = "0.2.5"
