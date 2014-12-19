@@ -23,7 +23,7 @@ struct ProbeOk;
 
 
 
-fn url_to_socket_addr(host: &str) -> IoResult<SocketAddr> {
+fn url_to_socket_addr(host: &str, port: u16) -> IoResult<SocketAddr> {
     // Just grab the first IPv4 address
     let addrs = try!(get_host_addresses(host));
     let addr = addrs.into_iter().find(|&a| {
@@ -33,7 +33,7 @@ fn url_to_socket_addr(host: &str) -> IoResult<SocketAddr> {
         }
     });
     let addr = addr.unwrap();
-    return Ok(SocketAddr{ip:addr, port: 80});
+    return Ok(SocketAddr{ip:addr, port: port});
 }
 
 fn http_path(url: &Url) -> String {
@@ -58,14 +58,14 @@ fn http_probe(url: &str) -> IoResult<ProbeResult> {
 
     let d = Duration::seconds(2);
     let http_host = format!("{}:{}", u.domain(), port);
-    let http_request = format!("GET {} HTTP/1.0\nHOST: {}\n\n", http_path(&u), u.domain().unwrap());
+    let http_request = format!("GET {} HTTP/1.0\nHOST: {}\n\n\n", http_path(&u), u.domain().unwrap());
 
 
-    let remote_addr = try!(url_to_socket_addr(u.domain().unwrap()));
+    let remote_addr = try!(url_to_socket_addr(u.domain().unwrap(), port));
 
     let mut stream = try!(TcpStream::connect_timeout(remote_addr, d));
     println!("Connected");
-    stream.set_timeout(Some(2000));
+    stream.set_timeout(Some(5000));
     stream.write(http_request.as_bytes());
     println!("Wrote");
     let re = stream.read_to_end();
