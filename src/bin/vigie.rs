@@ -1,22 +1,30 @@
+#![feature(io)]
+#![feature(core)]
+#![feature(collections)]
+#![feature(std_misc)]
+
 extern crate linenoise;
 extern crate url;
 
 use std::time::Duration;
-use std::io::TcpStream;
+use std::old_io::TcpStream;
 use url::Url;
 
-use std::io::{IoError, IoResult};
-use std::io::net::ip::{SocketAddr, Ipv4Addr, IpAddr};
-use std::io::net::addrinfo::get_host_addresses;
+use std::old_io::{IoResult};
+use std::old_io::net::ip::{SocketAddr, Ipv4Addr};
+use std::old_io::net::addrinfo::get_host_addresses;
 
 type ProbeResult = Result<Duration, ProbeError>;
 
-#[deriving(Show)]
+#[derive(Debug)]
 enum ProbeError {
     EarlyError,
-    RequestError,
+    ResolveError,
+    ConnectError,
     ReadError,
-    FullReadError
+    WriteError,
+    PositiveMissing,
+    NegativePresent,
 }
 
 struct ProbeOk;
@@ -47,7 +55,7 @@ fn http_path(url: &Url) -> String {
     return ret.to_string();
 }
 
-fn http_probe(url: &str) -> IoResult<ProbeResult> {
+fn get(url: &str, positive: Option<String>, negative: Option<String> ) -> Result<ProbeOk, ProbeError> {
 
     let u = Url::parse(url).unwrap();
 
@@ -56,79 +64,65 @@ fn http_probe(url: &str) -> IoResult<ProbeResult> {
         Some(i) => i,
     };
 
-    let d = Duration::seconds(2);
-    let http_host = format!("{}:{}", u.domain(), port);
-    let http_request = format!("GET {} HTTP/1.0\nHOST: {}\n\n\n", http_path(&u), u.domain().unwrap());
+    let http_request = format!("GET {} HTTP/1.0\r\nHOST: {}\r\n\r\n", http_path(&u), u.domain().unwrap());
 
+    match url_to_socket_addr(u.domain().unwrap(), port) {
+      Ok(remote_addr) => {
+        let c_timeout = Duration::seconds(2);
+        match TcpStream::connect_timeout(remote_addr, c_timeout) {
+          Ok(mut stream) => {
+            stream.set_timeout(Some(5000));
+            match stream.write_all(http_request.as_bytes()) {
+              Ok(()) => {
+                  let r = match stream.read_to_end() {
+                    Ok(content_vec) => {
+                      let content = String::from_utf8(content_vec).unwrap();
+                      let mut res = Ok(ProbeOk);
+                      if positive.is_some() && ! content.contains(&positive.unwrap()) {
+                        res = Err(ProbeError::PositiveMissing);
+                      }
+                      if negative.is_some() && content.contains(&negative.unwrap()) {
+                        res = Err(ProbeError::NegativePresent);
+                      }
+                      res
+                    },
+                    Err(_) => Err(ProbeError::ReadError)
+                  };
+                  stream.close_read().ok();
+                  stream.close_write().ok();
+                  return r;
+                },
+                Err(_) => Err(ProbeError::WriteError)
 
-    let remote_addr = try!(url_to_socket_addr(u.domain().unwrap(), port));
-
-    let mut stream = try!(TcpStream::connect_timeout(remote_addr, d));
-    println!("Connected");
-    stream.set_timeout(Some(5000));
-    stream.write(http_request.as_bytes());
-    println!("Wrote");
-    let re = stream.read_to_end();
-    println!("{}", re)
-
-    stream.close_read();
-    stream.close_write();
-
-    return Ok(Err(ProbeError::EarlyError));
+            }
+          },
+          Err(_) => return Err(ProbeError::ConnectError)
+        }
+      }
+      Err(_) => return Err(ProbeError::ResolveError)
+    }
 }
 
 
-// fn http_probe(url: &str) -> ProbeResult {
+fn http_probe(url: &str, positive: Option<String>, negative: Option<String> ) -> ProbeResult {
 
 
-//     let mut res: Result<ProbeOk, ProbeError> = Err(ProbeError::EarlyError);
+    let mut res: Result<ProbeOk, ProbeError> = Err(ProbeError::EarlyError);
 
-//     let d = Duration::span(|| {
+    let d = Duration::span(|| {
+      res = get(url, positive, negative);
+    });
 
-//         let url = Url::parse(url).unwrap();
-//         res = match RequestWriter::new(Get, url) {
-//             Ok(request) => match request.read_response() {
-//                     Ok(response) => {
-//                         let mut r = response;
-//                         match r.read_to_end() {
-//                             Ok(_) => Ok(ProbeOk),
-//                             Err(_) => Err(ProbeError::FullReadError),
-//                         }
-//                     },
-//                     Err((_, _)) => Err(ProbeError::ReadError)
-//                 },
-//             Err(_) => Err(ProbeError::RequestError),
-//         };
-//     });
+    return match res {
+        Ok(ProbeOk) => Ok(d),
+        Err(e) => Err(e),
+    };
 
-//     return match res {
-//         Ok(ProbeOk) => Ok(d),
-//         Err(e) => Err(e),
-//     };
-
-// }
+}
 
 fn main() {
-
-
-    let _ = http_probe("http://www.zoy.org/path/?pipo");
-
-    // loop {
-	   //  let val = linenoise::input("vigie> ");
-    //     match val {
-    //         None => { break }
-    //         Some(input) => {
-    //             println!("Probe {}", input);
-    //             match http_probe(input.as_slice()) {
-    //                 Ok(Ok(duration)) => println!("Took {}ms.", duration.num_milliseconds()),
-    //                 Ok(Err(err)) => println!("Failed {}", err),
-    //                 Err(err) => println!("Failed {}", err),
-    //             }
-    //             linenoise::history_add(input.as_slice());
-    //             if input.as_slice() == "clear" {
-    //             	linenoise::clear_screen();
-    //             }
-    //         }
-    //     }
-    // }
+  match http_probe("http://q.golden-genie.eu/", Some("Golden Genie".to_string()), None) {
+    Ok(duration) => println!("Ok, test took {}", duration),
+    Err(e) => println!("Error during probe: {:?}", e),
+  }
 }
