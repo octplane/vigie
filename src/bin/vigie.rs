@@ -1,35 +1,40 @@
 #![feature(io)]
+#![feature(os)]
 #![feature(core)]
 #![feature(collections)]
 #![feature(std_misc)]
 
 extern crate linenoise;
 extern crate url;
+extern crate getopts;
 
 use std::time::Duration;
 use std::old_io::TcpStream;
 use url::Url;
 
-use std::old_io::{IoResult};
+use std::old_io::{IoResult, IoError};
 use std::old_io::net::ip::{SocketAddr, Ipv4Addr};
 use std::old_io::net::addrinfo::get_host_addresses;
+use std::error::FromError;
+
+use getopts::Options;
+use std::os;
+
+//use std::thread::Thread;
+
 
 type ProbeResult = Result<Duration, ProbeError>;
 
 #[derive(Debug)]
 enum ProbeError {
-    EarlyError,
-    ResolveError,
-    ConnectError,
-    ReadError,
-    WriteError,
-    PositiveMissing,
-    NegativePresent,
+  IoError(IoError),
+  ResolveError,
+  EarlyError,
+  PositiveMissing,
+  NegativePresent,
 }
 
 struct ProbeOk;
-
-
 
 fn url_to_socket_addr(host: &str, port: u16) -> IoResult<SocketAddr> {
     // Just grab the first IPv4 address
@@ -55,6 +60,22 @@ fn http_path(url: &Url) -> String {
     return ret.to_string();
 }
 
+impl FromError<IoError> for ProbeError {
+    fn from_error(err: IoError) -> ProbeError {
+        ProbeError::IoError(err)
+    }
+}
+
+fn first(needle: &String , haystack: &Vec<u8>) -> Option<usize> {
+  let ne = needle.as_bytes();
+  for x in 0..haystack.len() {
+    if haystack[x..].starts_with(ne) {
+      return Some(x);
+    }
+  }
+  None
+}
+
 fn get(url: &str, positive: Option<String>, negative: Option<String> ) -> Result<ProbeOk, ProbeError> {
 
     let u = Url::parse(url).unwrap();
@@ -69,58 +90,145 @@ fn get(url: &str, positive: Option<String>, negative: Option<String> ) -> Result
     match url_to_socket_addr(u.domain().unwrap(), port) {
       Ok(remote_addr) => {
         let c_timeout = Duration::seconds(2);
-        match TcpStream::connect_timeout(remote_addr, c_timeout) {
-          Ok(mut stream) => {
-            stream.set_timeout(Some(5000));
-            match stream.write_all(http_request.as_bytes()) {
-              Ok(()) => {
-                  let r = match stream.read_to_end() {
-                    Ok(content_vec) => {
-                      let content = String::from_utf8(content_vec).unwrap();
-                      let mut res = Ok(ProbeOk);
-                      if positive.is_some() && ! content.contains(&positive.unwrap()) {
-                        res = Err(ProbeError::PositiveMissing);
-                      }
-                      if negative.is_some() && content.contains(&negative.unwrap()) {
-                        res = Err(ProbeError::NegativePresent);
-                      }
-                      res
-                    },
-                    Err(_) => Err(ProbeError::ReadError)
-                  };
-                  stream.close_read().ok();
-                  stream.close_write().ok();
-                  return r;
-                },
-                Err(_) => Err(ProbeError::WriteError)
-
-            }
+        let mut stream = try!(TcpStream::connect_timeout(remote_addr, c_timeout));
+        stream.set_timeout(Some(5000));
+        try!(stream.write_all(http_request.as_bytes()));
+        let content_vec =  try!(stream.read_to_end());
+        let mut res = match negative {
+          Some(n) => match first(&n, &content_vec) {
+            Some(_) => Err(ProbeError::NegativePresent),
+            None => Ok(ProbeOk)
           },
-          Err(_) => return Err(ProbeError::ConnectError)
-        }
-      }
+          None => Ok(ProbeOk)
+        };
+
+        res = match res {
+          Err(e) => Err(e),
+          Ok(ProbeOk) => match positive {
+            Some(p) => match first(&p, &content_vec) {
+              Some(_) => Ok(ProbeOk),
+              None => Err(ProbeError::PositiveMissing)
+            },
+            None => Ok(ProbeOk)
+          },
+        };
+
+        stream.close_read().ok();
+        stream.close_write().ok();
+
+        res
+      },
       Err(_) => return Err(ProbeError::ResolveError)
     }
 }
 
 
 fn http_probe(url: &str, positive: Option<String>, negative: Option<String> ) -> ProbeResult {
+  let mut res: Result<ProbeOk, ProbeError> = Err(ProbeError::EarlyError);
 
+  let d = Duration::span(|| {
+    res = get(url, positive, negative);
+  });
 
-    let mut res: Result<ProbeOk, ProbeError> = Err(ProbeError::EarlyError);
-
-    let d = Duration::span(|| {
-      res = get(url, positive, negative);
-    });
-
-    return match res {
-        Ok(ProbeOk) => Ok(d),
-        Err(e) => Err(e),
-    };
-
+  return match res {
+    Ok(ProbeOk) => Ok(d),
+    Err(e) => Err(e),
+  };
 }
 
+fn callback(input: &str) -> Vec<String> {
+  let mut ret : Vec<&str>;
+  if input.starts_with("m") {
+    ret = vec!["monitor", "suggestion2", "suggestion-three"];
+  } else {
+    ret = vec!["wot"];
+  }
+  return ret.iter().map(|s| s.to_string()).collect();
+}
+
+
+fn run_shell() {
+  linenoise::set_callback(callback);
+  loop {
+    let val = linenoise::input("vigie > ");
+    match val {
+      None => { break }
+      Some(input) => {
+        println!("> {}", input);
+        linenoise::history_add(input.as_slice());
+        if input.as_slice() == "clear" {
+          linenoise::clear_screen();
+        }
+      }
+    }
+  }
+}
+
+fn print_usage(program: &str, opts: Options) {
+    let brief = format!("Usage: {} [options]", program);
+    print!("{}", opts.usage(brief.as_slice()));
+}
+
+// fn echo(mut req: Request, mut res: Response) {
+//   match req.uri {
+//     AbsolutePath(ref path) => match (&req.method, &path[]) {
+//       (&Get, "/") | (&Get, "/echo") => {
+//         let out = b"Try POST /echo";
+
+//         res.headers_mut().set(ContentLength(out.len() as u64));
+//         let mut res = try_return!(res.start());
+//         try_return!(res.write_all(out));
+//         try_return!(res.end());
+//         return;
+//       },
+//     (&Post, "/echo") => (), // fall through, fighting mutable borrows
+//     _ => {
+//         *res.status_mut() = hyper::NotFound;
+//         try_return!(res.start().and_then(|res| res.end()));
+//         return;
+//       }
+//     },
+//     _ => {
+//       try_return!(res.start().and_then(|res| res.end()));
+//       return;
+//     }
+//   };
+
+//   let mut res = try_return!(res.start());
+//   try_return!(copy(&mut req, &mut res));
+//   try_return!(res.end());
+// }
+
+
+
 fn main() {
+  let args: Vec<String> = os::args();
+  let program = args[0].clone();
+
+  let mut opts = Options::new();
+  opts.optflag("s", "shell", "start shell");
+  opts.optflag("h", "help", "print this help menu");
+  let matches = match opts.parse(args.tail()) {
+      Ok(m) => { m }
+      Err(f) => { panic!(f.to_string()) }
+  };
+  if matches.opt_present("h") {
+      print_usage(program.as_slice(), opts);
+      return;
+  }
+
+  if matches.opt_present("s") {
+      run_shell();
+      return;
+  }
+
+  // let http = Thread::spawn({ move ||
+  //   let server = Server::http(Ipv4Addr(127, 0, 0, 1), 1337);
+  //   let mut listening = server.listen(echo).unwrap();
+
+  // });
+
+
   match http_probe("http://q.golden-genie.eu/", Some("Golden Genie".to_string()), None) {
     Ok(duration) => println!("Ok, test took {}", duration),
     Err(e) => println!("Error during probe: {:?}", e),

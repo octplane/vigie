@@ -17,5 +17,8 @@ name = "vigie"
 [dependencies]
 
 linenoise-rust = "~0.1.0"
-# yaml = "~0.0.6"
 url = "0.2.5"
+
+getopts = "~0.2.0"
+rustc-serialize = "~0.2.8"
+hyper = "0.1.10"
