@@ -1,8 +1,8 @@
 #![feature(io)]
 #![feature(os)]
 #![feature(core)]
-#![feature(collections)]
 #![feature(std_misc)]
+#![feature(env)]
 
 extern crate linenoise;
 extern crate url;
@@ -18,7 +18,6 @@ use std::old_io::net::addrinfo::get_host_addresses;
 use std::error::FromError;
 
 use getopts::Options;
-use std::os;
 
 //use std::thread::Thread;
 
@@ -164,7 +163,7 @@ fn run_shell() {
   }
 }
 
-fn print_usage(program: &str, opts: Options) {
+fn print_usage(program: String, opts: Options) {
     let brief = format!("Usage: {} [options]", program);
     print!("{}", opts.usage(brief.as_slice()));
 }
@@ -174,7 +173,6 @@ fn print_usage(program: &str, opts: Options) {
 //     AbsolutePath(ref path) => match (&req.method, &path[]) {
 //       (&Get, "/") | (&Get, "/echo") => {
 //         let out = b"Try POST /echo";
-
 //         res.headers_mut().set(ContentLength(out.len() as u64));
 //         let mut res = try_return!(res.start());
 //         try_return!(res.write_all(out));
@@ -202,18 +200,26 @@ fn print_usage(program: &str, opts: Options) {
 
 
 fn main() {
-  let args: Vec<String> = os::args();
-  let program = args[0].clone();
+  let mut args = std::env::args();
+  let program = match args.next() {
+    Some(oss) => {
+      match oss.into_string() {
+        Ok(s) => s,
+        Err(_) => "?".to_string()
+      }
+    },
+    None => "?".to_string()
+  };
 
   let mut opts = Options::new();
   opts.optflag("s", "shell", "start shell");
   opts.optflag("h", "help", "print this help menu");
-  let matches = match opts.parse(args.tail()) {
+  let matches = match opts.parse(args) {
       Ok(m) => { m }
       Err(f) => { panic!(f.to_string()) }
   };
   if matches.opt_present("h") {
-      print_usage(program.as_slice(), opts);
+      print_usage(program, opts);
       return;
   }
 
@@ -233,4 +239,9 @@ fn main() {
     Ok(duration) => println!("Ok, test took {}", duration),
     Err(e) => println!("Error during probe: {:?}", e),
   }
+  match http_probe("https://gitlab.zoy.org/users/sign_in", Some("GitLab".to_string()), None) {
+    Ok(duration) => println!("Ok, test took {}", duration),
+    Err(e) => println!("Error during probe: {:?}", e),
+  }
+
 }
